@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CRUD — MongoDB</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+<nav class="navbar navbar-light bg-white border-bottom px-4">
+    <span class="navbar-brand mb-0 fw-semibold">CRUD — MongoDB</span>
+    <a href="/dashboard" class="text-muted text-decoration-none" style="font-size:.875rem">← Dashboard</a>
+</nav>
+
+<div class="container py-4" style="max-width:900px">
+    <div id="toast" class="alert d-none mb-3 py-2"></div>
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <h6 class="card-title mb-3" id="formTitle">Nuevo documento</h6>
+            <input type="hidden" id="docId">
+            <div class="row g-3 mb-3">
+                <div class="col-md-3">
+                    <label class="form-label">Colección</label>
+                    <select class="form-select" id="collectionName" onchange="loadDocs()">
+                        <option value="usuarios">usuarios</option>
+                        <option value="productos">productos</option>
+                        <option value="pedidos">pedidos</option>
+                        <option value="logs">logs</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Nombre</label>
+                    <input type="text" class="form-control" id="quickName" placeholder="Ej: Juan" oninput="syncJson()">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Email</label>
+                    <input type="email" class="form-control" id="quickEmail" placeholder="correo@ejemplo.com" oninput="syncJson()">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Rol / Tipo</label>
+                    <input type="text" class="form-control" id="quickRole" placeholder="admin / user" oninput="syncJson()">
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label d-flex justify-content-between">
+                    Documento JSON
+                    <span id="jsonStatus" class="text-muted" style="font-size:.8rem"></span>
+                </label>
+                <textarea class="form-control font-monospace" id="jsonEditor" rows="4"
+                          placeholder='{"nombre": "Ejemplo", "email": "test@demo.com"}'
+                          oninput="validateJson()" style="font-size:.85rem"></textarea>
+            </div>
+            <div class="d-flex gap-2">
+                <button class="btn btn-dark btn-sm" id="btnCreate" onclick="createDoc()">Insertar</button>
+                <button class="btn btn-secondary btn-sm d-none" id="btnUpdate" onclick="updateDoc()">Actualizar</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="loadDocs()">↻ Recargar</button>
+                <button class="btn btn-link btn-sm text-muted" onclick="clearDocForm()">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="mb-3 d-flex gap-2 align-items-center">
+        <input type="text" class="form-control form-control-sm" style="max-width:300px" id="searchInput" placeholder="Filtrar documentos..." oninput="filterDocs()">
+        <span class="text-muted" style="font-size:.85rem" id="docCount"></span>
+    </div>
+
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                <tr><th style="font-size:.8rem">_id</th><th>Nombre</th><th>Email</th><th>Rol</th><th>Campos</th><th></th></tr>
+                </thead>
+                <tbody id="tableBody">
+                <tr><td colspan="6" class="text-center text-muted py-4">Cargando...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    let allDocs = [];
+    function getCol() { return document.getElementById('collectionName').value; }
+    function apiBase() { return `/api/nosql/${getCol()}`; }
+
+    function syncJson() {
+        const obj = {};
+        const name  = document.getElementById('quickName').value.trim();
+        const email = document.getElementById('quickEmail').value.trim();
+        const role  = document.getElementById('quickRole').value.trim();
+        if (name)  obj.nombre = name;
+        if (email) obj.email  = email;
+        if (role)  obj.rol    = role;
+        document.getElementById('jsonEditor').value = JSON.stringify(obj, null, 2);
+        validateJson();
+    }
+
+    function validateJson() {
+        const el = document.getElementById('jsonStatus');
+        try { JSON.parse(document.getElementById('jsonEditor').value); el.textContent = '✓ válido'; el.className = 'text-success'; }
+        catch { el.textContent = '✕ inválido'; el.className = 'text-danger'; }
+    }
+
+    async function loadDocs() {
+        document.getElementById('tableBody').innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Cargando...</td></tr>';
+        try {
+            const res = await fetch(apiBase());
+            allDocs = await res.json();
+            renderTable(allDocs);
+            document.getElementById('docCount').textContent = allDocs.length + ' documentos';
+        } catch {
+            document.getElementById('tableBody').innerHTML = '<tr><td colspan="6" class="text-center text-danger py-3">Error al conectar con MongoDB</td></tr>';
+        }
+    }
+
+    function renderTable(docs) {
+        const body = document.getElementById('tableBody');
+        if (!docs.length) { body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Sin documentos</td></tr>'; return; }
+        body.innerHTML = docs.map(doc => {
+            const id = doc._id || doc.id;
+            const totalFields = Object.keys(doc).filter(k => k !== '_id' && k !== '__v').length;
+            return `<tr>
+          <td class="text-muted font-monospace" style="font-size:.75rem">${String(id).slice(-8)}...</td>
+          <td>${esc(doc.nombre || doc.name || '—')}</td>
+          <td class="text-muted">${esc(doc.email || '—')}</td>
+          <td><span class="badge bg-light text-dark border">${esc(doc.rol || doc.role || '—')}</span></td>
+          <td class="text-muted" style="font-size:.85rem">${totalFields} campos</td>
+          <td>
+            <button class="btn btn-link btn-sm p-0 me-2 text-dark" onclick='editDoc(${JSON.stringify(doc)})'>Editar</button>
+            <button class="btn btn-link btn-sm p-0 text-danger" onclick="deleteDoc('${id}')">Eliminar</button>
+          </td>
+        </tr>`;
+        }).join('');
+    }
+
+    async function createDoc() {
+        let data;
+        try { data = JSON.parse(document.getElementById('jsonEditor').value); }
+        catch { return showToast('JSON inválido', 'danger'); }
+        try {
+            const res = await fetch(apiBase(), { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
+            if (!res.ok) throw new Error();
+            showToast('Documento insertado', 'success'); clearDocForm(); loadDocs();
+        } catch { showToast('Error al insertar', 'danger'); }
+    }
+
+    function editDoc(doc) {
+        const id = doc._id || doc.id;
+        document.getElementById('docId').value = id;
+        const clean = Object.fromEntries(Object.entries(doc).filter(([k]) => k !== '_id' && k !== '__v'));
+        document.getElementById('jsonEditor').value = JSON.stringify(clean, null, 2);
+        document.getElementById('quickName').value  = doc.nombre || doc.name || '';
+        document.getElementById('quickEmail').value = doc.email || '';
+        document.getElementById('quickRole').value  = doc.rol || doc.role || '';
+        document.getElementById('btnCreate').classList.add('d-none');
+        document.getElementById('btnUpdate').classList.remove('d-none');
+        document.getElementById('formTitle').textContent = 'Editando documento';
+        validateJson();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    async function updateDoc() {
+        const id = document.getElementById('docId').value;
+        let data;
+        try { data = JSON.parse(document.getElementById('jsonEditor').value); }
+        catch { return showToast('JSON inválido', 'danger'); }
+        try {
+            const res = await fetch(`${apiBase()}/${id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
+            if (!res.ok) throw new Error();
+            showToast('Documento actualizado', 'success'); clearDocForm(); loadDocs();
+        } catch { showToast('Error al actualizar', 'danger'); }
+    }
+
+    async function deleteDoc(id) {
+        if (!confirm('¿Eliminar este documento?')) return;
+        try {
+            await fetch(`${apiBase()}/${id}`, { method: 'DELETE' });
+            showToast('Eliminado', 'secondary'); loadDocs();
+        } catch { showToast('Error al eliminar', 'danger'); }
+    }
+
+    function clearDocForm() {
+        document.getElementById('docId').value = '';
+        document.getElementById('jsonEditor').value = '';
+        document.getElementById('quickName').value = '';
+        document.getElementById('quickEmail').value = '';
+        document.getElementById('quickRole').value = '';
+        document.getElementById('btnCreate').classList.remove('d-none');
+        document.getElementById('btnUpdate').classList.add('d-none');
+        document.getElementById('formTitle').textContent = 'Nuevo documento';
+        document.getElementById('jsonStatus').textContent = '';
+    }
+
+    function filterDocs() {
+        const q = document.getElementById('searchInput').value.toLowerCase();
+        const filtered = allDocs.filter(d => JSON.stringify(d).toLowerCase().includes(q));
+        renderTable(filtered);
+        document.getElementById('docCount').textContent = `${filtered.length} / ${allDocs.length} documentos`;
+    }
+
+    function showToast(msg, type) {
+        const el = document.getElementById('toast');
+        el.className = `alert alert-${type} py-2`;
+        el.textContent = msg;
+        el.classList.remove('d-none');
+        setTimeout(() => el.classList.add('d-none'), 3000);
+    }
+
+    function esc(str) { return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    loadDocs();
+</script>
+</body>
+</html>
